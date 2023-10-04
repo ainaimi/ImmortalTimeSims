@@ -53,7 +53,7 @@ alvec <- c(-1,rep(log(2), 3)) #Used to generate exposure (Intercept, L, LLast, A
 cval <- 30
 
 ##Begin the data-generation loop
-  simulation <- function (exposure) {
+simulation <- function (exposure) {
   
   for (i in 1:n) {
     ##Generate the counterfactual (untreated) survival time
@@ -89,8 +89,9 @@ cval <- 30
         
         eta <- alvec[1] + alvec[2]*L.vec[m+1] + alvec[3]*L.vec[m] + alvec[4]*A.vec[m]
         pval <- 1 / (1 + exp(-eta)) #A affected by L at this time point, last point and A at last time point
-        if (is.null(exposure)) {A.vec[m+1] <- rbinom(1, 1, pval)}
-        else {A.vec[m+1] <- exposure}
+             if (is.null(exposure)&A.vec[m]==0) {A.vec[m+1] <- rbinom(1, 1, pval)} #changed exposure to absorbing state
+        else if (is.null(exposure)&A.vec[m]==1) {A.vec[m+1] <- 1}
+        else if (!is.null(exposure)) {A.vec[m+1] <- exposure}
         ALast.vec[m+1] <- A.vec[m]; LLast.vec[m+1] <- L.vec[m];
       }
       
@@ -141,8 +142,7 @@ cval <- 30
 }
 
 # create simulation to be used in analysis steps
-
-s <- 7710
+s <- 100
 sim <- s
 all_res <- data.frame(Oracle = numeric(sim),
                       IPTW.PL = numeric(sim),
