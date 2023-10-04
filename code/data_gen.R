@@ -25,7 +25,7 @@ expit <- function(x) {1/(1+exp(-x))}
 ##
 ### Data generation
 ##
-n <- 500 # Number of subjects
+n <- 1000 # Number of subjects
 N <- 9 #number of intervals per subject
 K <- 1 # Number of causes of death
 
@@ -46,7 +46,7 @@ T0.vec<-T.vec<-Y.vec<-Z.vec <- rep(0, n)
 
 ##Here are the coefficients determining the
 ##mediation and treatment assignment mechanisms.
-bevec <- c(-2,rep(log(2), 3)) #Used to generate time-varying confounder L
+bevec <- c(-2,rep(log(1), 3)) #Used to generate time-varying confounder L
 alvec <- c(-1,rep(log(2), 3)) #Used to generate exposure (Intercept, L, LLast, ALast)
 
 ##cval is used as in Young's algorithm to introduce the confounding
@@ -267,5 +267,7 @@ res.sum <- res.sum %>%
     ),
     mse = sd^2 + bias^2
   )
+
+res.sum
 
 
