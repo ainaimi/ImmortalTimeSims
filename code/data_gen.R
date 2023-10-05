@@ -202,7 +202,7 @@ set.seed(1 + i)
 d1 <- simulation(exposure=1)
 d0 <- simulation(exposure=0)
 oracle_df <- bind_rows(d1, d0)
-oracle <- coxph(Surv(Int0, Tv, Z)  ~ A, data=oracle_df, ties="efron") 
+oracle <- coxph(Surv(Int0, Tv, Z)  ~ A + ALast, data=oracle_df, ties="efron") 
 all_res[i, "Oracle"] <- coef(oracle)[1]
 
 ###################################################
@@ -223,11 +223,11 @@ numerator[d$A == 0] <- 1 - expit(logit[d$A == 0])
 wt <- unlist(tapply(numerator / denominator, d$ID, cumprod))
 
 #IP-weighted Pooled Logistic Model
-iptw.pl <- suppressWarnings(glm(Z ~ A + as.factor(Int), data=d, family=binomial(link="logit"), weights=wt))
+iptw.pl <- suppressWarnings(glm(Z ~ A + ALast + as.factor(Int), data=d, family=binomial(link="logit"), weights=wt))
 all_res[i, "IPTW.PL"] <- coef(iptw.pl)[1]
 
 #IP-weighted Cox Model
-iptw.cox <- coxph(Surv(Int0, Tv, Z)  ~ A, data=d, weights=wt, ties="efron", timefix=FALSE)
+iptw.cox <- coxph(Surv(Int0, Tv, Z)  ~ A + ALast, data=d, weights=wt, ties="efron", timefix=FALSE)
 all_res[i, "IPTW.COX"] <- coef(iptw.cox)[1]
 
 ###################################################
@@ -236,17 +236,46 @@ all_res[i, "IPTW.COX"] <- coef(iptw.cox)[1]
 ## Immortal Person Time
 ###################################################
 #Generate Time-Fixed Data (where exposure is determined at Time 1)
-tte <- d %>% group_by(ID) %>% filter(row_number()==n()) %>% mutate(Tv2 = Tv) %>% select(c(ID, Tv2)) %>% ungroup()
-d1_tf <- d %>% group_by(ID) %>% filter(row_number()==1) %>% left_join(tte, by = "ID")
+tte <- d %>% 
+  mutate(first_exposure = as.numeric(A+ALast == 1),
+         last_id = as.numeric(Int==N|Z==1))
+d0 <- tte %>% 
+  filter(A==0) %>% 
+  group_by(ID) %>% 
+  mutate(max_time = max(Tv),
+         min_time = min(Int0)) %>% 
+  group_by(ID) %>% 
+  mutate(last_id = !duplicated(ID, fromLast = T)) %>% 
+  filter(last_id == 1) %>% 
+  select(ID, A, Z, min_time, max_time)
+
+d1 <- tte %>% 
+  filter(A==1) %>% 
+  group_by(ID) %>% 
+  mutate(max_time = max(Tv),
+         min_time = min(Int0)) %>% 
+  filter(last_id == 1) %>% 
+  select(ID, A, Z, min_time, max_time)
+
+d_temp <- rbind(d0,d1) %>% 
+  arrange(ID)  %>% 
+  group_by(ID) %>% 
+  mutate(ident = 1,
+         Int = cumsum(ident)) %>% 
+  mutate(last_id = !duplicated(ID, fromLast = T))
+
+d_a1 <- d_temp %>% filter(Int == 1) %>% select(ID,A) %>% rename(A1=A)
+
+d1_tf <- left_join(d_temp, d_a1) %>% select(-A) %>% rename(A=A1)
 
 #Time-Fixed IPW (with exposure values from Time 1)
-d1_tf$ps <- glm(A ~ L, data = d1_tf, family = binomial("logit"))$fitted.values 
+d1_tf$ps <- glm(A ~ 1, data = d1_tf, family = binomial("logit"))$fitted.values 
 
 #Stabilized weights
 d1_tf$sw <- (mean(d1_tf$A)/d1_tf$ps)*d1_tf$A + ((1 - mean(d1_tf$A))/(1-d1_tf$ps))*(1-d1_tf$A)
 summary(d1_tf$sw)
 
-iptw.cox <- coxph(Surv(Int0, Tv2, Z)  ~ A, data=d1_tf, weights=sw, ties="efron", timefix=FALSE)
+iptw.cox <- coxph(Surv(min_time, max_time, Z)  ~ A, data=d1_tf, weights=sw, ties="efron", timefix=FALSE)
 all_res[i, "IPTW.TF1"] <- coef(iptw.cox)[1]
 
 ###################################################
@@ -255,16 +284,18 @@ all_res[i, "IPTW.TF1"] <- coef(iptw.cox)[1]
 ## Immortal Person Time
 ###################################################
 #Generate Time-Fixed Data (where exposure is determined at Time 2)
-d2_tf <- d %>% group_by(ID) %>% filter(row_number()<= 2) %>% filter(row_number()==n()) %>% left_join(tte, by = "ID")
+d_a2 <- d_temp %>% filter(last_id == TRUE) %>% select(ID,A) %>% rename(A2=A)
+
+d2_tf <- left_join(d_temp, d_a2) %>% select(-A) %>% rename(A=A2)
 
 #Time-Fixed IPW (with exposure values from Time 1)
-d2_tf$ps <- glm(A ~ L, data = d2_tf, family = binomial("logit"))$fitted.values 
+d2_tf$ps <- glm(A ~ 1, data = d2_tf, family = binomial("logit"))$fitted.values 
 
 #Stabilized weights
 d2_tf$sw <- (mean(d2_tf$A)/d2_tf$ps)*d2_tf$A + ((1 - mean(d2_tf$A))/(1-d2_tf$ps))*(1-d2_tf$A)
 summary(d2_tf$sw)
 
-iptw.cox <- coxph(Surv(Int0, Tv2, Z)  ~ A, data=d2_tf, weights=sw, ties="efron", timefix=FALSE)
+iptw.cox <- coxph(Surv(min_time, max_time, Z)  ~ A, data=d2_tf, weights=sw, ties="efron", timefix=FALSE)
 all_res[i, "IPTW.TF2"] <- coef(iptw.cox)[1]
 }
 
