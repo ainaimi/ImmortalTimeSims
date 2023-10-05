@@ -202,7 +202,7 @@ set.seed(1 + i)
 d1 <- simulation(exposure=1)
 d0 <- simulation(exposure=0)
 oracle_df <- bind_rows(d1, d0)
-oracle <- coxph(Surv(Int0, Tv, Z)  ~ A, data=oracle_df) 
+oracle <- coxph(Surv(Int0, Tv, Z)  ~ A, data=oracle_df, ties="efron") 
 all_res[i, "Oracle"] <- coef(oracle)[1]
 
 ###################################################
