@@ -71,7 +71,6 @@ simulation <- function (exposure) {
         eta <- bevec[1] + bevec[2]*Ival + bevec[3]*0 + bevec[4]*0
         pval <- 1 / (1 + exp(-eta))
         L.vec[m+1] <- rbinom(1, 1, pval)
-
         
         eta <- alvec[1] + alvec[2]*L.vec[m+1] + alvec[3]*0 + alvec[4]*0 #design matrix
         pval <- 1 / (1 + exp(-eta))
@@ -140,6 +139,49 @@ simulation <- function (exposure) {
   
   return(DeathsK.df)
 }
+
+
+plot_dat <- simulation(exposure=NULL) %>% 
+  mutate(first_exposure = as.numeric(A+ALast == 1),
+         last_id = as.numeric(Int==9|Z==1))
+
+p0 <- plot_dat %>% 
+  filter(A==0) %>% 
+  group_by(ID) %>% 
+  mutate(max_time = max(Tv),
+         min_time = min(Int0)) %>% 
+  group_by(ID) %>% 
+  mutate(last_id = !duplicated(ID, fromLast = T)) %>% 
+  filter(last_id == 1) %>% 
+  select(ID, A, Z, min_time, max_time)
+
+p1 <- plot_dat %>% 
+  filter(A==1) %>% 
+  group_by(ID) %>% 
+  mutate(max_time = max(Tv),
+         min_time = min(Int0)) %>% 
+  filter(last_id == 1) %>% 
+  select(ID, A, Z, min_time, max_time)
+
+p <- rbind(p0,p1) %>% 
+  arrange(ID)  %>% 
+  group_by(ID) %>% 
+  mutate(last_id = !duplicated(ID, fromLast = T))
+
+ggplot() + 
+  geom_segment(data = p[p$ID<21,], 
+               aes(x=min_time, 
+                   xend=max_time, 
+                   y = ID, 
+                   yend=ID, color=factor(A))) +
+  geom_point(data = p[p$ID<21&p$last_id==1,], 
+             aes(x = max_time, 
+                 y = ID, 
+                 shape = factor(Z))) +
+  theme_classic() + 
+  scale_x_continuous(expand=c(0,0)) +
+  scale_y_continuous(expand=c(0,0)) + 
+  xlab("Time on Study")
 
 # create simulation to be used in analysis steps
 s <- 100
