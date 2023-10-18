@@ -26,7 +26,7 @@ expit <- function(x) {1/(1+exp(-x))}
 ### Data generation
 ##
 n <- 1000 # Number of subjects
-N <- 9 #number of intervals per subject
+N <- 10 #number of intervals per subject
 K <- 1 # Number of causes of death
 
 ## This is the matrix of parameters of interest, possibly different
@@ -54,96 +54,107 @@ cval <- 30
 
 ##Begin the data-generation loop
 simulation <- function (exposure) {
-  
-  for (i in 1:n) {
-    ##Generate the counterfactual (untreated) survival time
-    T0 <- rexp(1, lambda) #Generate T0 from an exponential dist with constant rate=lamba
-    Ival <- as.numeric(T0 < cval)
-    ##Begin the interval-by-interval simulation
-    m <- 0
-    mu.tot <- 0
-    A.vec<-L.vec<-ALast.vec<-LLast.vec<-LFirst.vec<-rep(0, N+1)
-    ##Implement Young's algorithm with multiple causes
-    ##Generate the survival time, then the cause
-    while (muK*T0 > mu.tot & m <= N) {
-      if (m == 0) {
-        ##First interval
-        eta <- bevec[1] + bevec[2]*Ival + bevec[3]*0 + bevec[4]*0
-        pval <- 1 / (1 + exp(-eta))
-        L.vec[m+1] <- rbinom(1, 1, pval)
+    new_n = 0
+    while (new_n < n){ 
+      for (i in (new_n + 1)) {
+      #print(new_n)
+        ##Generate the counterfactual (untreated) survival time
+        T0 <- rexp(1, lambda) #Generate T0 from an exponential dist with constant rate=lamba
+        Ival <- as.numeric(T0 < cval)
+        ##Begin the interval-by-interval simulation
+        m <- 0
+        mu.tot <- 0
+        A.vec<-L.vec<-ALast.vec<-LLast.vec<-LFirst.vec<-rep(0, N+1)
+        ##Implement Young's algorithm with multiple causes
+        ##Generate the survival time, then the cause
+        while (muK*T0 > mu.tot & m <= N) {
+          if (m == 0) {
+            ##First interval
+            eta <- bevec[1] + bevec[2]*Ival + bevec[3]*0 + bevec[4]*0
+            pval <- 1 / (1 + exp(-eta))
+            L.vec[m+1] <- rbinom(1, 1, pval)
+            
+            eta <- alvec[1] + alvec[2]*L.vec[m+1] + alvec[3]*0 + alvec[4]*0 #design matrix
+            pval <- 1 / (1 + exp(-eta))
+            if (is.null(exposure)) {A.vec[m + 1] <- rbinom(1, 1, pval)} #generating observed A based on binomial distr
+            else {A.vec[m+1] <- exposure}
+            
+            ALast.vec[m+1] <- 0; LLast.vec[m+1] <- 0;
+            LFirst.vec <- rep(L.vec[m+1], N + 1)
+            
+          } else {
+            ##Subsequent intervals
+            eta <- bevec[1] + bevec[2]*Ival + bevec[3]*A.vec[m] + bevec[4]*L.vec[m]
+            pval <- 1 / (1 + exp(-eta))
+            L.vec[m+1] <- rbinom(1, 1, pval) 
+            
+            eta <- alvec[1] + alvec[2]*L.vec[m+1] + alvec[3]*L.vec[m] + alvec[4]*A.vec[m]
+            pval <- 1 / (1 + exp(-eta)) #A affected by L at this time point, last point and A at last time point
+                 if (is.null(exposure)&A.vec[m]==0) {A.vec[m+1] <- rbinom(1, 1, pval)} #changed exposure to absorbing state
+            else if (is.null(exposure)&A.vec[m]==1) {A.vec[m+1] <- 1}
+            else if (!is.null(exposure)) {A.vec[m+1] <- exposure}
+            ALast.vec[m+1] <- A.vec[m]; LLast.vec[m+1] <- L.vec[m];
+          }
+          
+          muval <- sum(exp(gamma.vec + A.vec[m+1]*psi.mat[ , m+1]))
+          
+          ##Tval is computed for each interval, but is overwritten
+          ##until the final interval
+          Tval <- m + (muK * T0 - mu.tot) / muval
+          mu.tot <- mu.tot + muval
+          m <- m + 1
+        }
         
-        eta <- alvec[1] + alvec[2]*L.vec[m+1] + alvec[3]*0 + alvec[4]*0 #design matrix
-        pval <- 1 / (1 + exp(-eta))
-        if (is.null(exposure)) {A.vec[m + 1] <- rbinom(1, 1, pval)} #generating observed A based on binomial distr
-        else {A.vec[m+1] <- exposure}
+        ##After exiting the loop, the survival time has been generated as Tval
+        ##Now need to generate the failure type.
+        if (m > N) {
+          ##In the case of censoring at tenth interval, no failure.
+          Tval <- m - 1
+          Z.vec[i] <- 0
+        } else {
+          ##In the case of failure, use the ratio hazards to define the
+          ##relevant multinomial distribution on the K causes.
+          Z.vec[i] <- sample(c(1:K), 1, prob = exp(gamma.vec + A.vec[m]*psi.mat[ ,m])) # I don't really get this step
+        }
         
-        ALast.vec[m+1] <- 0; LLast.vec[m+1] <- 0;
-        LFirst.vec <- rep(L.vec[m+1], N + 1)
+        ##Store the outcomes
+        T0.vec[i] <- T0
+        T.vec[i] <- Tval
+        Y.vec[i] <- m - 1
+        ID <- c(ID, rep(i,m)) #Individual
+        Int <- c(Int, c(1:m)) #Time point
+        A <- c(A, A.vec[1:m]) #Time-updated treatment
+        L <- c(L, L.vec[1:m]) #Time-updated covariate L
+        ALast <- c(ALast, ALast.vec[1:m]) #Treatment at last t point
+        LLast <- c(LLast, LLast.vec[1:m]) #Covariate L at last t point
+        LFirst <- c(LFirst, LFirst.vec[1:m]) #Baseline covariate L value
+        Z <- c(Z, rep(0,m - 1), Z.vec[i]) #Outcome: Z>0 indicates outcome of some type, determined by value)
+        tv <- c(1:m); tv[m] <- Tval
+        Tv <- c(Tv, tv) #If event occurs, exact time at which it occurred; o.w. equal to Int)
         
-      } else {
-        ##Subsequent intervals
-        eta <- bevec[1] + bevec[2]*Ival + bevec[3]*A.vec[m] + bevec[4]*L.vec[m]
-        pval <- 1 / (1 + exp(-eta))
-        L.vec[m+1] <- rbinom(1, 1, pval) 
-        
-        eta <- alvec[1] + alvec[2]*L.vec[m+1] + alvec[3]*L.vec[m] + alvec[4]*A.vec[m]
-        pval <- 1 / (1 + exp(-eta)) #A affected by L at this time point, last point and A at last time point
-             if (is.null(exposure)&A.vec[m]==0) {A.vec[m+1] <- rbinom(1, 1, pval)} #changed exposure to absorbing state
-        else if (is.null(exposure)&A.vec[m]==1) {A.vec[m+1] <- 1}
-        else if (!is.null(exposure)) {A.vec[m+1] <- exposure}
-        ALast.vec[m+1] <- A.vec[m]; LLast.vec[m+1] <- L.vec[m];
       }
       
-      muval <- sum(exp(gamma.vec + A.vec[m+1]*psi.mat[ , m+1]))
+      DeathsK.df <- data.frame(ID, Int, Tv, A, ALast, L, LLast, LFirst, Z)
       
-      ##Tval is computed for each interval, but is overwritten
-      ##until the final interval
-      Tval <- m + (muK * T0 - mu.tot) / muval
-      mu.tot <- mu.tot + muval
-      m <- m + 1
+      ##Trim off the intervals beyond the Nth (loop goes one too far)
+      DeathsK.df <- DeathsK.df[DeathsK.df$Int <= N, ]
+      DeathsK.df$Int0 <- DeathsK.df$Int - 1
+      
+      length(unique(DeathsK.df$ID))
+      
+      DeathsK.df <- DeathsK.df %>% filter(!(Tv<1&Z==1))
+      
+      new_n <- length(unique(DeathsK.df$ID))
+      
     }
-    
-    ##After exiting the loop, the survival time has been generated as Tval
-    ##Now need to generate the failure type.
-    if (m > N) {
-      ##In the case of censoring at tenth interval, no failure.
-      Tval <- m - 1
-      Z.vec[i] <- 0
-    } else {
-      ##In the case of failure, use the ratio hazards to define the
-      ##relevant multinomial distribution on the K causes.
-      Z.vec[i] <- sample(c(1:K), 1, prob = exp(gamma.vec + A.vec[m]*psi.mat[ ,m])) # I don't really get this step
-    }
-    
-    ##Store the outcomes
-    T0.vec[i] <- T0
-    T.vec[i] <- Tval
-    Y.vec[i] <- m - 1
-    ID <- c(ID, rep(i,m)) #Individual
-    Int <- c(Int, c(1:m)) #Time point
-    A <- c(A, A.vec[1:m]) #Time-updated treatment
-    L <- c(L, L.vec[1:m]) #Time-updated covariate L
-    ALast <- c(ALast, ALast.vec[1:m]) #Treatment at last t point
-    LLast <- c(LLast, LLast.vec[1:m]) #Covariate L at last t point
-    LFirst <- c(LFirst, LFirst.vec[1:m]) #Baseline covariate L value
-    Z <- c(Z, rep(0,m - 1), Z.vec[i]) #Outcome: Z>0 indicates outcome of some type, determined by value)
-    tv <- c(1:m); tv[m] <- Tval
-    Tv <- c(Tv, tv) #If event occurs, exact time at which it occurred; o.w. equal to Int)
-  }
-  
-  DeathsK.df <- data.frame(ID, Int, Tv, A, ALast, L, LLast, LFirst, Z)
-  
-  ##Trim off the intervals beyond the Nth (loop goes one too far)
-  DeathsK.df <- DeathsK.df[DeathsK.df$Int <= N, ]
-  DeathsK.df$Int0 <- DeathsK.df$Int - 1
-  
+
   return(DeathsK.df)
 }
 
 
 plot_dat <- simulation(exposure=NULL) %>% 
   mutate(first_exposure = as.numeric(A+ALast == 1),
-         last_id = as.numeric(Int==9|Z==1))
+         last_id = as.numeric(Int==10|Z==1))
 
 p0 <- plot_dat %>% 
   filter(A==0) %>% 
@@ -179,8 +190,8 @@ ggplot() +
                  y = ID, 
                  shape = factor(Z))) +
   theme_classic() + 
-  scale_x_continuous(expand=c(0,0)) +
-  scale_y_continuous(expand=c(0,0)) + 
+  # scale_x_continuous(expand=c(0,0)) +
+  # scale_y_continuous(expand=c(0,0)) + 
   xlab("Time on Study")
 
 # create simulation to be used in analysis steps
